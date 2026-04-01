@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Color Change</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: background-color 0.3s ease;
+      background-color: #ffffff;
+    }
+    button {
+      padding: 16px 32px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.2);
+      color: white;
+      backdrop-filter: blur(4px);
+    }
+    button:hover {
+      background: rgba(0, 0, 0, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <button onclick="document.body.style.backgroundColor='#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0')">
+    Change Color
+  </button>
+</body>
+</html>
