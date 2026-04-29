@@ -1,248 +1,236 @@
-// ---------- Color Math ----------
+// ---------- State ----------
+const CIRCUMFERENCE = 2 * Math.PI * 104; // r=104
 
-function hexToHsl(hex) {
-  let r = parseInt(hex.slice(1,3),16)/255;
-  let g = parseInt(hex.slice(3,5),16)/255;
-  let b = parseInt(hex.slice(5,7),16)/255;
-  const max = Math.max(r,g,b), min = Math.min(r,g,b);
-  let h, s, l = (max+min)/2;
-  if (max === min) { h = s = 0; }
-  else {
-    const d = max - min;
-    s = l > 0.5 ? d/(2-max-min) : d/(max+min);
-    switch(max){
-      case r: h = ((g-b)/d + (g<b?6:0))/6; break;
-      case g: h = ((b-r)/d + 2)/6; break;
-      case b: h = ((r-g)/d + 4)/6; break;
-    }
-  }
-  return [h*360, s*100, l*100];
-}
-
-function hslToHex(h, s, l) {
-  h = ((h % 360) + 360) % 360;
-  s = Math.max(0, Math.min(100, s));
-  l = Math.max(0, Math.min(100, l));
-  s /= 100; l /= 100;
-  const c = (1 - Math.abs(2*l-1)) * s;
-  const x = c * (1 - Math.abs((h/60)%2-1));
-  const m = l - c/2;
-  let r=0,g=0,b=0;
-  if      (h<60)  { r=c; g=x; b=0; }
-  else if (h<120) { r=x; g=c; b=0; }
-  else if (h<180) { r=0; g=c; b=x; }
-  else if (h<240) { r=0; g=x; b=c; }
-  else if (h<300) { r=x; g=0; b=c; }
-  else            { r=c; g=0; b=x; }
-  const toHex = v => Math.round((v+m)*255).toString(16).padStart(2,'0');
-  return '#' + toHex(r) + toHex(g) + toHex(b);
-}
-
-function jitter(val, amount) {
-  return val + (Math.random() - 0.5) * amount;
-}
-
-// ---------- Palette Generators ----------
-
-function generateComplementary(hex) {
-  const [h,s,l] = hexToHsl(hex);
-  return [
-    hex,
-    hslToHex(h, jitter(s,8), jitter(l+15,5)),
-    hslToHex(h, jitter(s-10,6), jitter(l-15,5)),
-    hslToHex(h+180, jitter(s,8), jitter(l,8)),
-    hslToHex(h+180, jitter(s-8,6), jitter(l+15,5)),
-    hslToHex(h+180, jitter(s,6), jitter(l-15,5)),
-    hslToHex(h, jitter(s-20,6), jitter(l+25,5)),
-  ];
-}
-
-function generateAnalogous(hex) {
-  const [h,s,l] = hexToHsl(hex);
-  return [
-    hslToHex(h-60, jitter(s,8), jitter(l,6)),
-    hslToHex(h-30, jitter(s,6), jitter(l,5)),
-    hex,
-    hslToHex(h+30, jitter(s,6), jitter(l,5)),
-    hslToHex(h+60, jitter(s,8), jitter(l,6)),
-    hslToHex(h+90, jitter(s-5,6), jitter(l+5,5)),
-    hslToHex(h-90, jitter(s-5,6), jitter(l+5,5)),
-  ];
-}
-
-function generateTriadic(hex) {
-  const [h,s,l] = hexToHsl(hex);
-  return [
-    hex,
-    hslToHex(h, jitter(s-10,6), jitter(l+20,5)),
-    hslToHex(h+120, jitter(s,8), jitter(l,6)),
-    hslToHex(h+120, jitter(s-8,6), jitter(l+18,5)),
-    hslToHex(h+240, jitter(s,8), jitter(l,6)),
-    hslToHex(h+240, jitter(s-8,6), jitter(l+18,5)),
-    hslToHex(h, jitter(s-20,8), jitter(l-20,5)),
-  ];
-}
-
-function generateShades(hex) {
-  const [h,s] = hexToHsl(hex);
-  return [
-    hslToHex(h, s*0.4, 92),
-    hslToHex(h, s*0.6, 78),
-    hslToHex(h, s*0.8, 60),
-    hex,
-    hslToHex(h, s*0.9, 38),
-    hslToHex(h, s*0.95, 24),
-    hslToHex(h, s, 12),
-  ];
-}
-
-const generators = {
-  complementary: generateComplementary,
-  analogous:     generateAnalogous,
-  triadic:       generateTriadic,
-  shades:        generateShades,
+const state = {
+  status: 'idle',   // idle | running | paused | done
+  total: 0,
+  remaining: 0,
+  interval: null,
 };
 
-// ---------- State ----------
-
-let currentHex = '#FF6B6B';
-let currentMode = 'complementary';
-let palette = [];       // array of { hex, locked }
-let initialized = false;
-
 // ---------- DOM ----------
+const scene       = document.getElementById('scene');
+const glow        = document.getElementById('glow');
+const setup       = document.getElementById('setup');
+const inputMin    = document.getElementById('inputMin');
+const inputSec    = document.getElementById('inputSec');
+const ringFg      = document.getElementById('ringFg');
+const ringWrap    = document.querySelector('.ring-wrap');
+const timeDisplay = document.getElementById('timeDisplay');
+const phaseLabel  = document.getElementById('phaseLabel');
+const doneOverlay = document.getElementById('doneOverlay');
+const mainBtn     = document.getElementById('mainBtn');
+const resetBtn    = document.getElementById('resetBtn');
+const lapBtn      = document.getElementById('lapBtn');
+const particles   = document.getElementById('particles');
 
-const hexInput     = document.getElementById('hexInput');
-const inputPreview = document.getElementById('inputPreview');
-const paletteEl    = document.getElementById('palette');
-const regenBtn     = document.getElementById('regenerateBtn');
-const toast        = document.getElementById('toast');
-const tabs         = document.querySelectorAll('.tab');
+// ---------- Phases ----------
+// Each phase: [hue, saturation%, lightness% for --color], label, threshold (fraction remaining)
+const PHASES = [
+  { min: 0.5,  hue: 250, label: 'Focused',   sat: 80, lit: 65 },
+  { min: 0.25, hue: 185, label: 'Cruising',  sat: 75, lit: 58 },
+  { min: 0.10, hue: 38,  label: 'Getting close…', sat: 85, lit: 60 },
+  { min: 0.03, hue: 18,  label: 'Almost!',   sat: 90, lit: 60 },
+  { min: 0,    hue: 0,   label: 'Hurry!',    sat: 90, lit: 58 },
+];
 
-// ---------- Rendering ----------
-
-function isValidHex(h) { return /^#[0-9A-Fa-f]{6}$/.test(h); }
-
-function luminance(hex) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
-  return (0.299*r + 0.587*g + 0.114*b) / 255;
+function getPhase(fraction) {
+  for (const p of PHASES) {
+    if (fraction >= p.min) return p;
+  }
+  return PHASES[PHASES.length - 1];
 }
 
-function colorName(hex) {
-  const [h,s,l] = hexToHsl(hex);
-  if (s < 8) return l > 70 ? 'Light Gray' : l < 30 ? 'Dark Gray' : 'Gray';
-  const hNames = ['Red','Orange','Yellow','Lime','Green','Teal','Cyan','Sky','Blue','Indigo','Violet','Purple','Pink','Rose'];
-  const idx = Math.round(h / (360/hNames.length)) % hNames.length;
-  const prefix = l > 70 ? 'Light ' : l < 35 ? 'Dark ' : '';
-  return prefix + hNames[idx];
+function applyPhase(fraction) {
+  const p = getPhase(fraction);
+  document.documentElement.style.setProperty('--hue', p.hue);
+  document.documentElement.style.setProperty('--color',
+    `hsl(${p.hue}, ${p.sat}%, ${p.lit}%)`);
+  document.documentElement.style.setProperty('--color-dim',
+    `hsl(${p.hue}, ${p.sat - 20}%, 30%)`);
+  document.documentElement.style.setProperty('--bg',
+    `hsl(${p.hue}, 25%, 8%)`);
+  phaseLabel.textContent = state.status === 'paused' ? 'Paused' : p.label;
+
+  ringWrap.classList.toggle('urgent', fraction < 0.10 && fraction > 0);
 }
 
-function buildPalette(hex) {
-  const colors = generators[currentMode](hex);
-  if (!initialized || palette.length !== colors.length) {
-    palette = colors.map(c => ({ hex: c, locked: false }));
-    initialized = true;
+// ---------- Ring ----------
+function setRing(fraction) {
+  const offset = CIRCUMFERENCE * (1 - Math.max(0, fraction));
+  ringFg.style.strokeDashoffset = offset;
+}
+
+// ---------- Display ----------
+function fmt(secs) {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function render() {
+  const fraction = state.total > 0 ? state.remaining / state.total : 1;
+  timeDisplay.textContent = fmt(state.remaining);
+  setRing(fraction);
+  applyPhase(fraction);
+}
+
+// ---------- Particles ----------
+function spawnParticles() {
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  const hue = getComputedStyle(document.documentElement).getPropertyValue('--hue').trim();
+
+  for (let i = 0; i < 48; i++) {
+    const el = document.createElement('div');
+    el.className = 'particle';
+    const size = 6 + Math.random() * 10;
+    const angle = Math.random() * 2 * Math.PI;
+    const dist  = 80 + Math.random() * 220;
+    const h = parseInt(hue) + (Math.random() - 0.5) * 60;
+    el.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${cx}px; top:${cy}px;
+      background: hsl(${h}, 85%, 65%);
+      --tx: ${Math.cos(angle)*dist}px;
+      --ty: ${Math.sin(angle)*dist}px;
+      animation-delay: ${Math.random()*0.2}s;
+      animation-duration: ${0.8 + Math.random()*0.6}s;
+    `;
+    particles.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+}
+
+// ---------- Timer logic ----------
+function tick() {
+  if (state.remaining <= 0) {
+    finish();
+    return;
+  }
+  state.remaining--;
+  render();
+
+  // subtle body shake at last 3 seconds
+  if (state.remaining <= 3 && state.remaining > 0) {
+    scene.classList.remove('shake');
+    void scene.offsetWidth; // reflow
+    scene.classList.add('shake');
+  }
+}
+
+function start() {
+  if (state.status === 'idle') {
+    const mins = Math.max(0, parseInt(inputMin.value) || 0);
+    const secs = Math.max(0, Math.min(59, parseInt(inputSec.value) || 0));
+    const total = mins * 60 + secs;
+    if (total <= 0) return;
+    state.total     = total;
+    state.remaining = total;
+    setup.classList.add('hidden');
+  }
+
+  state.status = 'running';
+  mainBtn.textContent = 'Pause';
+  doneOverlay.classList.remove('show');
+  state.interval = setInterval(tick, 1000);
+  render();
+}
+
+function pause() {
+  state.status = 'paused';
+  clearInterval(state.interval);
+  mainBtn.textContent = 'Resume';
+  phaseLabel.textContent = 'Paused';
+}
+
+function reset() {
+  clearInterval(state.interval);
+  state.status    = 'idle';
+  state.total     = 0;
+  state.remaining = 0;
+  mainBtn.textContent = 'Start';
+  doneOverlay.classList.remove('show');
+  ringWrap.classList.remove('urgent');
+  setup.classList.remove('hidden');
+
+  // reset visuals
+  const mins = Math.max(0, parseInt(inputMin.value) || 0);
+  const secs = Math.max(0, Math.min(59, parseInt(inputSec.value) || 0));
+  timeDisplay.textContent = fmt(mins * 60 + secs);
+  phaseLabel.textContent  = 'Ready';
+  setRing(1);
+  applyPhase(1);
+}
+
+function finish() {
+  clearInterval(state.interval);
+  state.status    = 'done';
+  state.remaining = 0;
+  mainBtn.textContent = 'Restart';
+
+  setRing(0);
+  ringWrap.classList.remove('urgent');
+
+  // hue → green for done
+  document.documentElement.style.setProperty('--hue', '140');
+  document.documentElement.style.setProperty('--color', 'hsl(140, 75%, 58%)');
+  document.documentElement.style.setProperty('--bg', 'hsl(140, 25%, 8%)');
+
+  doneOverlay.classList.add('show');
+  spawnParticles();
+
+  // extra wave of particles
+  setTimeout(spawnParticles, 400);
+  setTimeout(spawnParticles, 800);
+}
+
+// ---------- Button handlers ----------
+mainBtn.addEventListener('click', () => {
+  if (state.status === 'idle')    { start(); return; }
+  if (state.status === 'running') { pause(); return; }
+  if (state.status === 'paused')  { start(); return; }
+  if (state.status === 'done')    { reset(); }
+});
+
+resetBtn.addEventListener('click', reset);
+
+lapBtn.addEventListener('click', () => {
+  if (state.status === 'done') return;
+  state.total     += 60;
+  state.remaining += 60;
+  if (state.status === 'idle') {
+    // also update input
+    const total = (parseInt(inputMin.value)||0)*60 + (parseInt(inputSec.value)||0) + 60;
+    inputMin.value = Math.floor(total / 60);
+    inputSec.value = total % 60;
+    timeDisplay.textContent = fmt(total);
   } else {
-    palette = palette.map((p, i) => p.locked ? p : { hex: colors[i], locked: false });
-  }
-}
-
-function renderPalette() {
-  paletteEl.innerHTML = '';
-  palette.forEach((item, i) => {
-    const lum = luminance(item.hex);
-    const textColor = lum > 0.5 ? '#111' : '#fff';
-
-    const swatch = document.createElement('div');
-    swatch.className = 'swatch' + (item.locked ? ' locked' : '');
-    swatch.style.setProperty('--delay', i * 0.04 + 's');
-    swatch.style.animationDelay = i * 0.04 + 's';
-
-    swatch.innerHTML = `
-      <div class="swatch-color" style="background:${item.hex}"></div>
-      <div class="swatch-info">
-        <div class="swatch-hex">${item.hex.toUpperCase()}</div>
-        <div class="swatch-name">${colorName(item.hex)}</div>
-        <div class="swatch-actions">
-          <button class="lock-btn" title="${item.locked ? 'Unlock' : 'Lock'}">
-            ${item.locked
-              ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Locked'
-              : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg> Lock'}
-          </button>
-          <span class="copy-hint">click to copy</span>
-        </div>
-      </div>`;
-
-    swatch.querySelector('.lock-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      palette[i].locked = !palette[i].locked;
-      renderPalette();
-    });
-
-    swatch.addEventListener('click', () => copyHex(item.hex));
-
-    paletteEl.appendChild(swatch);
-  });
-}
-
-function update(hex) {
-  if (!isValidHex(hex)) return;
-  currentHex = hex;
-  inputPreview.style.background = hex;
-  buildPalette(hex);
-  renderPalette();
-}
-
-// ---------- Toast ----------
-
-let toastTimer;
-function copyHex(hex) {
-  navigator.clipboard.writeText(hex).catch(() => {
-    const ta = document.createElement('textarea');
-    ta.value = hex; document.body.appendChild(ta);
-    ta.select(); document.execCommand('copy');
-    document.body.removeChild(ta);
-  });
-  toast.textContent = `Copied ${hex.toUpperCase()}`;
-  toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
-}
-
-// ---------- Events ----------
-
-hexInput.addEventListener('input', () => {
-  const val = '#' + hexInput.value.replace(/[^0-9a-fA-F]/g,'').slice(0,6);
-  inputPreview.style.background = val.length === 7 ? val : '#555';
-  if (val.length === 7) {
-    initialized = false; // allow fresh palette on new valid input
-    update(val);
+    render();
   }
 });
 
-tabs.forEach(tab => {
-  tab.addEventListener('click', () => {
-    tabs.forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    currentMode = tab.dataset.mode;
-    initialized = false;
-    if (isValidHex(currentHex)) update(currentHex);
-  });
-});
+// Sync time display with inputs while idle
+function syncDisplay() {
+  if (state.status !== 'idle') return;
+  const mins = Math.max(0, parseInt(inputMin.value) || 0);
+  const secs = Math.max(0, Math.min(59, parseInt(inputSec.value) || 0));
+  timeDisplay.textContent = fmt(mins * 60 + secs);
+}
 
-regenBtn.addEventListener('click', () => {
-  if (isValidHex(currentHex)) {
-    const colors = generators[currentMode](currentHex);
-    palette = palette.map((p, i) => p.locked ? p : { hex: colors[i], locked: false });
-    renderPalette();
-  }
+inputMin.addEventListener('input', syncDisplay);
+inputSec.addEventListener('input', syncDisplay);
+
+// Clamp seconds on blur
+inputSec.addEventListener('blur', () => {
+  let v = parseInt(inputSec.value) || 0;
+  if (v > 59) { v = 59; inputSec.value = 59; }
+  if (v < 0)  { v = 0;  inputSec.value = 0; }
+  syncDisplay();
 });
 
 // ---------- Init ----------
-
-hexInput.value = 'FF6B6B';
-inputPreview.style.background = currentHex;
-buildPalette(currentHex);
-renderPalette();
+syncDisplay();
+applyPhase(1);
+ringFg.style.strokeDasharray = CIRCUMFERENCE;
+ringFg.style.strokeDashoffset = 0;
